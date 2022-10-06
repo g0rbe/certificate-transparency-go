@@ -17,6 +17,7 @@ package scanner
 import (
 	"context"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -49,6 +50,14 @@ type FetcherOptions struct {
 	// Continuous determines whether Fetcher should run indefinitely after
 	// reaching EndIndex.
 	Continuous bool
+
+	// STH retrieval backoff state.
+	STHBackoff *backoff.Backoff
+
+	STHQuickDur time.Duration
+
+	// Logs retrieval backoff state.
+	LogBackoff *backoff.Backoff
 }
 
 // DefaultFetcherOptions returns new FetcherOptions with sensible defaults.
@@ -59,6 +68,7 @@ func DefaultFetcherOptions() *FetcherOptions {
 		StartIndex:    0,
 		EndIndex:      0,
 		Continuous:    false,
+		STHQuickDur:   45 * time.Second,
 	}
 }
 
@@ -73,8 +83,6 @@ type Fetcher struct {
 
 	// Current STH of the Log this Fetcher sends queries to.
 	sth *ct.SignedTreeHead
-	// The STH retrieval backoff state. Used only in Continuous fetch mode.
-	sthBackoff *backoff.Backoff
 
 	// Stops range generator, which causes the Fetcher to terminate gracefully.
 	mu     sync.Mutex
@@ -220,10 +228,8 @@ func (f *Fetcher) genRanges(ctx context.Context) <-chan fetchRange {
 // to *any* STH bigger than the old one if it takes too long.
 // Returns error only if the context is cancelled.
 func (f *Fetcher) updateSTH(ctx context.Context) error {
-	// TODO(pavelkalinnikov): Make these parameters tunable.
-	const quickDur = 45 * time.Second
-	if f.sthBackoff == nil {
-		f.sthBackoff = &backoff.Backoff{
+	if f.opts.STHBackoff == nil {
+		f.opts.STHBackoff = &backoff.Backoff{
 			Min:    1 * time.Second,
 			Max:    30 * time.Second,
 			Factor: 2,
@@ -233,9 +239,9 @@ func (f *Fetcher) updateSTH(ctx context.Context) error {
 
 	lastSize := uint64(f.opts.EndIndex)
 	targetSize := lastSize + uint64(f.opts.BatchSize)
-	quickDeadline := time.Now().Add(quickDur)
+	quickDeadline := time.Now().Add(f.opts.STHQuickDur)
 
-	return f.sthBackoff.Retry(ctx, func() error {
+	return f.opts.STHBackoff.Retry(ctx, func() error {
 		sth, err := f.client.GetSTH(ctx)
 		if err != nil {
 			return err
@@ -248,7 +254,7 @@ func (f *Fetcher) updateSTH(ctx context.Context) error {
 		}
 
 		if quick {
-			f.sthBackoff.Reset() // Growth is presumably fast, set next pause to Min.
+			f.opts.STHBackoff.Reset() // Growth is presumably fast, set next pause to Min.
 		}
 		f.sth = sth
 		f.opts.EndIndex = int64(sth.TreeSize)
@@ -268,15 +274,22 @@ func (f *Fetcher) runWorker(ctx context.Context, ranges <-chan fetchRange, fn fu
 			if ctx.Err() != nil { // Prevent spinning when context is canceled.
 				return
 			}
-			// TODO(pavelkalinnikov): Make these parameters tunable.
-			// This backoff will only apply to a single request and be reset for the next one.
-			// This precludes reaching some kind of stability in request rate, but means that
-			// an intermittent problem won't harm long-term running of the worker.
-			bo := &backoff.Backoff{
-				Min:    1 * time.Second,
-				Max:    30 * time.Second,
-				Factor: 2,
-				Jitter: true,
+
+			var bo *backoff.Backoff
+
+			// If backoff not set, use the old method:
+			// 		This backoff will only apply to a single request and be reset for the next one.
+			// 		This precludes reaching some kind of stability in request rate, but means that
+			// 		an intermittent problem won't harm long-term running of the worker.
+			if f.opts.LogBackoff == nil {
+				bo = &backoff.Backoff{
+					Min:    1 * time.Second,
+					Max:    30 * time.Second,
+					Factor: 2,
+					Jitter: true,
+				}
+			} else {
+				bo = f.opts.LogBackoff
 			}
 
 			var resp *ct.GetEntriesResponse
@@ -284,7 +297,24 @@ func (f *Fetcher) runWorker(ctx context.Context, ranges <-chan fetchRange, fn fu
 			if err := bo.Retry(ctx, func() error {
 				var err error
 				resp, err = f.client.GetRawEntries(ctx, r.start, r.end)
-				return err
+
+				// Too many request, nothing to see here. Wait and restart fetching loop.
+				if strings.Contains(err.Error(), "429 Too Many Requests") ||
+
+					// A temporary error, sleep 10 sec and restart fetching loop
+					strings.Contains(err.Error(), "Client.Timeout exceeded while awaiting headers") ||
+					strings.Contains(err.Error(), "no such host") ||
+					strings.Contains(err.Error(), "connection reset by peer") ||
+
+					// Context is set to TODO() so, Client.Timeout must be the issue, restart fetching loop after 10 sec
+					strings.Contains(err.Error(), "Client.Timeout or context cancellation while reading body") {
+
+					return backoff.RetriableError(err.Error())
+				} else {
+
+					return err
+				}
+
 			}); err != nil {
 				if rspErr, isRspErr := err.(jsonclient.RspError); isRspErr && rspErr.StatusCode == http.StatusTooManyRequests {
 					klog.V(2).Infof("%s: GetRawEntries() failed: %v", f.uri, err)
