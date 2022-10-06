@@ -1,4 +1,4 @@
-module github.com/google/certificate-transparency-go
+module github.com/g0rbe/certificate-transparency-go
 
 go 1.17
 
