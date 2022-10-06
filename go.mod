@@ -5,6 +5,7 @@ go 1.17
 require (
 	github.com/fullstorydev/grpcurl v1.8.7
 	github.com/golang/mock v1.6.0
+	github.com/google/certificate-transparency-go v1.1.3
 	github.com/google/go-cmp v0.5.9
 	github.com/google/trillian v1.5.1-0.20220819043421-0a389c4bb8d9
 	github.com/gorilla/mux v1.8.0
@@ -20,7 +21,7 @@ require (
 	go.etcd.io/etcd/client/v3 v3.5.5
 	go.etcd.io/etcd/etcdctl/v3 v3.5.5
 	go.etcd.io/etcd/v3 v3.5.5
-	golang.org/x/crypto v0.0.0-20220411220226-7b82a4e95df4
+	golang.org/x/crypto v0.0.0-20221005025214-4161e89ecf1b
 	golang.org/x/net v0.0.0-20220722155237-a158d28d115b
 	golang.org/x/time v0.0.0-20220411224347-583f2d630306
 	google.golang.org/grpc v1.48.0
@@ -54,6 +55,7 @@ require (
 	github.com/go-logr/logr v1.2.0 // indirect
 	github.com/go-sql-driver/mysql v1.6.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
+	github.com/golang/glog v1.0.0 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/google/btree v1.1.2 // indirect
