@@ -296,24 +296,30 @@ func (f *Fetcher) runWorker(ctx context.Context, ranges <-chan fetchRange, fn fu
 			// TODO(pavelkalinnikov): Report errors in a LogClient decorator on failure.
 			if err := bo.Retry(ctx, func() error {
 				var err error
+
 				resp, err = f.client.GetRawEntries(ctx, r.start, r.end)
 
-				// Too many request, nothing to see here. Wait and restart fetching loop.
-				if strings.Contains(err.Error(), "429 Too Many Requests") ||
+				if err != nil {
 
-					// A temporary error, sleep 10 sec and restart fetching loop
-					strings.Contains(err.Error(), "Client.Timeout exceeded while awaiting headers") ||
-					strings.Contains(err.Error(), "no such host") ||
-					strings.Contains(err.Error(), "connection reset by peer") ||
+					// Too many request, nothing to see here. Wait and restart fetching loop.
+					if strings.Contains(err.Error(), "429 Too Many Requests") ||
 
-					// Context is set to TODO() so, Client.Timeout must be the issue, restart fetching loop after 10 sec
-					strings.Contains(err.Error(), "Client.Timeout or context cancellation while reading body") {
+						// A temporary error, sleep 10 sec and restart fetching loop
+						strings.Contains(err.Error(), "Client.Timeout exceeded while awaiting headers") ||
+						strings.Contains(err.Error(), "no such host") ||
+						strings.Contains(err.Error(), "connection reset by peer") ||
 
-					return backoff.RetriableError(err.Error())
-				} else {
+						// Context is set to TODO() so, Client.Timeout must be the issue, restart fetching loop after 10 sec
+						strings.Contains(err.Error(), "Client.Timeout or context cancellation while reading body") {
 
-					return err
+						return backoff.RetriableError(err.Error())
+					} else {
+
+						return err
+					}
 				}
+
+				return nil
 
 			}); err != nil {
 				if rspErr, isRspErr := err.(jsonclient.RspError); isRspErr && rspErr.StatusCode == http.StatusTooManyRequests {
