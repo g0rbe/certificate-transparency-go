@@ -312,6 +312,8 @@ func (f *Fetcher) runWorker(ctx context.Context, ranges <-chan fetchRange, fn fu
 						// Context is set to TODO() so, Client.Timeout must be the issue, restart fetching loop after 10 sec
 						strings.Contains(err.Error(), "Client.Timeout or context cancellation while reading body") {
 
+						klog.Errorf("%s: GetRawEntries() handled error: %v", f.uri, err)
+
 						return backoff.RetriableError(err.Error())
 					} else {
 
