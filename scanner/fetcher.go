@@ -301,15 +301,10 @@ func (f *Fetcher) runWorker(ctx context.Context, ranges <-chan fetchRange, fn fu
 
 				if err != nil {
 
-					// Too many request, nothing to see here. Wait and restart fetching loop.
 					if strings.Contains(err.Error(), "429 Too Many Requests") ||
-
-						// A temporary error, sleep 10 sec and restart fetching loop
 						strings.Contains(err.Error(), "Client.Timeout exceeded while awaiting headers") ||
 						strings.Contains(err.Error(), "no such host") ||
 						strings.Contains(err.Error(), "connection reset by peer") ||
-
-						// Context is set to TODO() so, Client.Timeout must be the issue, restart fetching loop after 10 sec
 						strings.Contains(err.Error(), "Client.Timeout or context cancellation while reading body") {
 
 						klog.Errorf("%s: GetRawEntries() handled error: %v", f.uri, err)
